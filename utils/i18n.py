@@ -1,7 +1,7 @@
 import json
 import sys
+import locale
 from pathlib import Path
-import ctypes
 from utils.config import get_assets_dir
 
 _translations = {}
@@ -10,7 +10,6 @@ _current_lang = 'en'
 
 def _get_translations_path() -> Path | None:
     """Ищет translations.json: сначала в AppData, потом рядом со скриптом."""
-
     appdata = get_assets_dir() / 'translations.json'
     if appdata.exists():
         return appdata
@@ -53,11 +52,17 @@ def get_lang() -> str:
 
 
 def detect_system_lang() -> str:
-    """Определяет язык интерфейса Windows. Возвращает 'ru' или 'en'."""
+    """Определяет язык интерфейса системы. Возвращает 'ru' или 'en'."""
     try:
         if sys.platform == 'win32':
+            import ctypes
             lang_id = ctypes.windll.kernel32.GetUserDefaultUILanguage()
             if lang_id == 0x0419:
+                return 'ru'
+        else:
+            # macOS / Linux
+            loc = locale.getdefaultlocale()[0] or locale.getlocale()[0] or ''
+            if loc.lower().startswith('ru'):
                 return 'ru'
         return 'en'
     except Exception:
