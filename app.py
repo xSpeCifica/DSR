@@ -428,19 +428,40 @@ def main(page: ft.Page):
         page.add(shell)
 
         # ── Keyboard shortcuts ──
+        async def _keyboard_handler(key: str):
+            """Async keyboard handler with player lock to prevent overlapping audio."""
+            async with source_zone._player_lock:
+                if key in ("A", "ARROW_LEFT"):
+                    if source_zone.audio_files:
+                        if source_zone.is_playing:
+                            await source_zone._stop_preview_locked()
+                        source_zone.current_index = (source_zone.current_index - 1) % len(source_zone.audio_files)
+                        source_zone._update_ui_state()
+                        source_zone.update()
+                elif key in ("D", "ARROW_RIGHT"):
+                    if source_zone.audio_files:
+                        if source_zone.is_playing:
+                            await source_zone._stop_preview_locked()
+                        source_zone.current_index = (source_zone.current_index + 1) % len(source_zone.audio_files)
+                        source_zone._update_ui_state()
+                        source_zone.update()
+                elif key == " ":
+                    if source_zone.audio_files:
+                        if source_zone.is_playing:
+                            await source_zone._stop_preview_locked()
+                        else:
+                            await source_zone._start_preview_locked()
+
         def on_keyboard(e: ft.KeyboardEvent):
-            """A/D and Arrow keys navigate source sounds. Space toggles preview."""
+            """Sync wrapper — skips if a TextField/Dropdown has focus."""
             key = e.key.upper()
 
-            if key in ("A", "ARROW_LEFT"):
-                if source_zone.audio_files:
-                    page.run_task(source_zone.prev_sound, None)
-            elif key in ("D", "ARROW_RIGHT"):
-                if source_zone.audio_files:
-                    page.run_task(source_zone.next_sound, None)
-            elif key == " ":
-                if source_zone.audio_files:
-                    page.run_task(source_zone.toggle_preview, None)
+            # Skip if any text input is focused
+            if e.control is not None and isinstance(e.control, (ft.TextField, ft.Dropdown)):
+                return
+
+            if key in ("A", "ARROW_LEFT", "D", "ARROW_RIGHT", " "):
+                page.run_task(_keyboard_handler, key)
 
         page.on_keyboard_event = on_keyboard
 

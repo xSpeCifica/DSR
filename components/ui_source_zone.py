@@ -30,6 +30,7 @@ class SourceAudioZone(ft.Container):
 
         self.player = None
         self.is_playing = False
+        self._player_lock = asyncio.Lock()
 
         self.title_text = ft.Text(
             t("source_zone.title"),
@@ -60,6 +61,7 @@ class SourceAudioZone(ft.Container):
             overflow=ft.TextOverflow.ELLIPSIS
         )
 
+        # ── Popup menu: single PopupMenuItem with search + list inside ──
         self.file_picker_menu = ft.PopupMenuButton(
             content=ft.Container(
                 content=ft.Row([
@@ -213,6 +215,7 @@ class SourceAudioZone(ft.Container):
 
         # Restore UI state if data was passed in
         if self.audio_files:
+            self.rebuild_options_list("")
             self._update_ui_state()
 
     def format_time(self, seconds: float) -> str:
@@ -244,24 +247,33 @@ class SourceAudioZone(ft.Container):
                     border_radius=6,
                     bgcolor=ft.Colors.PINK_600 if is_selected else ft.Colors.TRANSPARENT,
                     alignment=ft.Alignment.CENTER_LEFT,
-                    on_click=lambda e, index=idx: self.page.run_task(self.handle_file_selected, index)
+                    on_click=lambda e, index=idx: self.page.run_task(self._handle_item_click, index)
                 )
             )
 
         self.options_column.controls = items
+
+    async def _handle_item_click(self, index: int):
+        """Handle file selection: close menu + select file."""
+        try:
+            self.file_picker_menu.close()
+        except Exception:
+            pass
+        await self.handle_file_selected(index)
 
     async def handle_search_change(self, e):
         self.rebuild_options_list(e.control.value)
         self.file_picker_menu.update()
 
     async def handle_file_selected(self, index: int):
-        if self.is_playing:
-            await self.stop_preview()
+        async with self._player_lock:
+            if self.is_playing:
+                await self._stop_preview_locked()
 
-        self.current_index = index
-        self._update_ui_state()
-        self.update()
-        await self.start_preview()
+            self.current_index = index
+            self._update_ui_state()
+            self.update()
+            await self._start_preview_locked()
 
     def _update_ui_state(self):
         if self.audio_files:
@@ -318,33 +330,40 @@ class SourceAudioZone(ft.Container):
             self.update()
 
     async def next_sound(self, e):
-        if self.audio_files:
-            if self.is_playing:
-                await self.stop_preview()
-            self.current_index = (self.current_index + 1) % len(self.audio_files)
-            self._update_ui_state()
-            self.update()
+        async with self._player_lock:
+            if self.audio_files:
+                if self.is_playing:
+                    await self._stop_preview_locked()
+                self.current_index = (self.current_index + 1) % len(self.audio_files)
+                self._update_ui_state()
+                self.update()
 
     async def prev_sound(self, e):
-        if self.audio_files:
-            if self.is_playing:
-                await self.stop_preview()
-            self.current_index = (self.current_index - 1) % len(self.audio_files)
-            self._update_ui_state()
-            self.update()
+        async with self._player_lock:
+            if self.audio_files:
+                if self.is_playing:
+                    await self._stop_preview_locked()
+                self.current_index = (self.current_index - 1) % len(self.audio_files)
+                self._update_ui_state()
+                self.update()
 
     async def toggle_preview(self, e):
-        if self.is_playing:
-            await self.stop_preview()
-        else:
-            await self.start_preview()
+        async with self._player_lock:
+            if self.is_playing:
+                await self._stop_preview_locked()
+            else:
+                await self._start_preview_locked()
 
-    async def start_preview(self):
+    async def _start_preview_locked(self):
+        """Must be called with _player_lock held."""
         if not self.audio_files:
             return
+        # Stop any existing player first
+        if self.player:
+            self.player.stop()
+            self.player = None
 
         target_file = self.audio_files[self.current_index]
-
         self.player = AudioPlayerEngine(
             filepath=str(target_file),
             speed=1.0,
@@ -352,19 +371,27 @@ class SourceAudioZone(ft.Container):
             end_sec=None,
             on_finished=lambda: self.page.run_task(self.handle_playback_finished)
         )
-
         self.play_btn.icon = ft.Icons.STOP_ROUNDED
         self.is_playing = True
         self.update()
-
         self.player.start()
 
-    async def stop_preview(self):
+    async def _stop_preview_locked(self):
+        """Must be called with _player_lock held."""
         if self.player:
             self.player.stop()
+            self.player = None
         self.play_btn.icon = ft.Icons.PLAY_ARROW_ROUNDED
         self.is_playing = False
         self.update()
+
+    async def start_preview(self):
+        async with self._player_lock:
+            await self._start_preview_locked()
+
+    async def stop_preview(self):
+        async with self._player_lock:
+            await self._stop_preview_locked()
 
     async def handle_playback_finished(self):
         self.play_btn.icon = ft.Icons.PLAY_ARROW_ROUNDED

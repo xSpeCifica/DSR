@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+
 class AudioPlayerEngine:
     def __init__(self, filepath, speed=1.0, start_sec=0.0, end_sec=None, volume=1.0, on_position_changed=None, on_finished=None):
         self.filepath = filepath
@@ -25,6 +26,7 @@ class AudioPlayerEngine:
         self.samplerate = 44100
         self._lock = threading.Lock()
         self._thread = None
+        self._stream = None
 
     def load(self):
         print(f"\n[ENGINE] Загрузка файла плеером...")
@@ -104,14 +106,16 @@ class AudioPlayerEngine:
                 dtype='float32',
                 callback=callback,
                 blocksize=1024
-            ):
+            ) as stream:
+                self._stream = stream
                 while self.is_playing:
-                    time.sleep(0.05)
+                    time.sleep(0.02)
 
         except Exception as e:
             print(f"Ошибка в потоке плеера: {e}")
         finally:
             self.is_playing = False
+            self._stream = None
             if self.on_finished:
                 self.on_finished()
 
@@ -128,9 +132,24 @@ class AudioPlayerEngine:
             self.is_paused = not self.is_paused
         return self.is_paused
 
-    def stop(self):
+    def stop(self, timeout: float = 0.5):
+        """Stop playback immediately and wait for the thread to finish."""
         with self._lock:
+            was_playing = self.is_playing
             self.is_playing = False
+
+        # Force-close the audio stream to immediately stop callback
+        if self._stream is not None:
+            try:
+                self._stream.close()
+            except Exception:
+                pass
+            self._stream = None
+
+        # Wait for the thread to actually finish
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=timeout)
+        self._thread = None
 
     def set_speed(self, speed):
         with self._lock:
