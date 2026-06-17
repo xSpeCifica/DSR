@@ -5,44 +5,63 @@ import flet as ft
 from utils.audio_engine import AudioPlayerEngine
 from utils.ffmpeg_core import get_audio_duration
 from utils.waveform_core import generate_waveform_image
+from utils.i18n import t
 
 class ReplaceAudioZone(ft.Container):
-    def __init__(self):
-        super().__init__(width=650)
+    def __init__(
+        self,
+        portrait_mode: bool = False,
+        new_file_path: str | None = None,
+        current_speed: float = 1.0,
+        current_volume: float = 1.0,
+        trim_start: float = 0.0,
+        trim_end: float = 0.0,
+    ):
+        self._portrait = portrait_mode
 
-        self.new_file_path = None
-        self.track_duration = 0.0  
+        # ── Dimensions based on orientation ──
+        zone_width = 520 if portrait_mode else 650
+        wf_width = 490 if portrait_mode else 602
+        wf_height = 42
+        slider_width = 160 if portrait_mode else 180
+
+        super().__init__(width=zone_width)
+
+        self.new_file_path = new_file_path
+        self.track_duration = 0.0
         self.samplerate = 44100
-        self.current_speed = 1.0
-        self.current_volume = 1.0
+        self.current_speed = current_speed
+        self.current_volume = current_volume
 
-        self.player = None 
+        self.player = None
         self.is_playing = False
         self.file_picker = None
 
-        self.waveform_width = 602
-        self.waveform_height = 42
-        self._slider_padding = 12
+        self.waveform_width = wf_width
+        self.waveform_height = wf_height
+        self._slider_padding = 10 if portrait_mode else 12
         self._last_ph_update = 0.0
+        self._saved_trim_start = trim_start
+        self._saved_trim_end = trim_end
 
         self.title_text = ft.Text(
-            "Новый звук (заменяющий)", 
-            weight=ft.FontWeight.W_600, 
-            size=14, 
+            t("replace_zone.title"),
+            weight=ft.FontWeight.W_600,
+            size=14,
             color=ft.Colors.BLUE_800
         )
 
         self.track_title = ft.Text(
-            "Выберите файл...", 
-            weight=ft.FontWeight.BOLD, 
-            size=13, 
+            "Выберите файл...",
+            weight=ft.FontWeight.BOLD,
+            size=13,
             color=ft.Colors.GREY_900,
             overflow=ft.TextOverflow.ELLIPSIS
         )
 
         self.trim_info = ft.Text(
-            "", 
-            size=12, 
+            "хуй",
+            size=12,
             weight=ft.FontWeight.W_500,
             color=ft.Colors.LIGHT_BLUE_700
         )
@@ -51,7 +70,7 @@ class ReplaceAudioZone(ft.Container):
         self.end_time_text = ft.Text("00:00.000", size=11, color=ft.Colors.BLUE_700)
 
         self.play_btn = ft.IconButton(
-            icon=ft.Icons.PLAY_ARROW_ROUNDED, 
+            icon=ft.Icons.PLAY_ARROW_ROUNDED,
             icon_color=ft.Colors.LIGHT_BLUE_600,
             icon_size=24,
             width=36,
@@ -65,13 +84,13 @@ class ReplaceAudioZone(ft.Container):
             border=ft.Border.all(1, ft.Colors.with_opacity(0.3, ft.Colors.BLUE_400)),
             border_radius=10,
             bgcolor=ft.Colors.with_opacity(0.01, ft.Colors.WHITE),
-            padding=ft.Padding.symmetric(horizontal=15),
+            padding=ft.Padding.symmetric(horizontal=12),
             content=ft.Row([
-                ft.Text("Выберите файл для замены:", size=13, opacity=0.8),
+                ft.Text(t("replace_zone.placeholder"), size=13, opacity=0.8),
                 ft.ElevatedButton(
-                    "Выбрать файл", 
-                    on_click=self.open_file, 
-                    bgcolor=ft.Colors.with_opacity(0.1, ft.Colors.BLUE_600), 
+                    t("replace_zone.pick_file"),
+                    on_click=self.open_file,
+                    bgcolor=ft.Colors.with_opacity(0.1, ft.Colors.BLUE_600),
                     color=ft.Colors.BLUE_800,
                     style=ft.ButtonStyle(
                         shape=ft.RoundedRectangleBorder(radius=6),
@@ -90,7 +109,7 @@ class ReplaceAudioZone(ft.Container):
 
         self.speed_label = ft.Text("1.00x", size=11, weight=ft.FontWeight.BOLD, color=ft.Colors.LIGHT_BLUE_700)
         self.speed_slider = ft.Slider(
-            width=180, min=0.25, max=2.0, value=1.0,
+            width=slider_width, min=0.25, max=2.0, value=1.0,
             divisions=35,
             active_color=ft.Colors.LIGHT_BLUE_500,
             inactive_color=ft.Colors.BLUE_100,
@@ -99,7 +118,7 @@ class ReplaceAudioZone(ft.Container):
 
         self.volume_label = ft.Text("100%", size=11, weight=ft.FontWeight.BOLD, color=ft.Colors.LIGHT_BLUE_700)
         self.volume_slider = ft.Slider(
-            width=180, min=0, max=200, value=100,
+            width=slider_width, min=0, max=200, value=100,
             divisions=20,
             active_color=ft.Colors.LIGHT_BLUE_500,
             inactive_color=ft.Colors.BLUE_100,
@@ -171,62 +190,163 @@ class ReplaceAudioZone(ft.Container):
             padding=ft.Padding.symmetric(horizontal=self._slider_padding)
         )
 
-        self.active_view = ft.Container(
-            visible=False,
-            padding=ft.Padding.symmetric(horizontal=10, vertical=6),
-            border=ft.Border.all(1, ft.Colors.with_opacity(0.1, ft.Colors.WHITE)),
-            border_radius=10,
-            bgcolor=ft.Colors.with_opacity(0.02, ft.Colors.WHITE),
-            content=ft.Column([
-                ft.Row([
-                    self.play_btn,
-                    ft.Container(content=self.track_title, expand=True, padding=ft.Padding.only(left=5)), 
-                    ft.IconButton(
-                        icon=ft.Icons.MORE_HORIZ, 
-                        icon_color=ft.Colors.BLUE_400, 
-                        icon_size=20, 
-                        tooltip="Выбрать другой файл", 
-                        on_click=self.open_file
-                    )
-                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-
-                ft.Column([
-                    self.waveform_stack,
-                    ft.Container(
-                        content=self.trim_slider,
-                        margin=ft.Margin.symmetric(vertical=-4),
-                        padding=ft.Padding.symmetric(horizontal=0),
-                    ),
-                ], spacing=0),
-
-                ft.Row([
-                    self.start_time_text, 
-                    self.trim_info, 
-                    self.end_time_text
-                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-
-                ft.Divider(height=1, thickness=1, color=ft.Colors.with_opacity(0.03, ft.Colors.BLACK)),
-
-                ft.Row([
+        # ── Active view: portrait = compact stacked layout ──
+        if portrait_mode:
+            self.active_view = ft.Container(
+                visible=False,
+                padding=ft.Padding.symmetric(horizontal=6, vertical=5),
+                border=ft.Border.all(1, ft.Colors.with_opacity(0.1, ft.Colors.WHITE)),
+                border_radius=10,
+                bgcolor=ft.Colors.with_opacity(0.02, ft.Colors.WHITE),
+                content=ft.Column([
                     ft.Row([
-                        ft.Text("Скорость:", size=11, color=ft.Colors.GREY_700), 
-                        self.speed_slider,
-                        self.speed_label
-                    ], spacing=10),
+                        self.play_btn,
+                        ft.Container(content=self.track_title, expand=True, padding=ft.Padding.only(left=4)),
+                        ft.IconButton(
+                            icon=ft.Icons.MORE_HORIZ,
+                            icon_color=ft.Colors.BLUE_400,
+                            icon_size=20,
+                            tooltip="Выбрать другой файл",
+                            on_click=self.open_file
+                        )
+                    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+
+                    ft.Column([
+                        self.waveform_stack,
+                        ft.Container(
+                            content=self.trim_slider,
+                            margin=ft.Margin.symmetric(vertical=-4),
+                            padding=ft.Padding.symmetric(horizontal=0),
+                        ),
+                    ], spacing=0),
+
                     ft.Row([
-                        ft.Text("Громкость:", size=11, color=ft.Colors.GREY_700), 
-                        self.volume_slider,
-                        self.volume_label
-                    ], spacing=10),
-                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
-            ], spacing=6)
-        )
+                        self.start_time_text,
+                        self.trim_info,
+                        self.end_time_text
+                    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+
+                    ft.Divider(height=1, thickness=1, color=ft.Colors.with_opacity(0.03, ft.Colors.BLACK)),
+
+                    # Portrait: speed & volume stacked vertically, centered
+                    ft.Row([
+                        ft.Column([
+                            ft.Text("Скорость:", size=10, color=ft.Colors.GREY_700),
+                            self.speed_slider,
+                            self.speed_label,
+                        ], spacing=0, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                        ft.Column([
+                            ft.Text("Громкость:", size=10, color=ft.Colors.GREY_700),
+                            self.volume_slider,
+                            self.volume_label,
+                        ], spacing=0, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                    ], alignment=ft.MainAxisAlignment.SPACE_AROUND)
+                ], spacing=4)
+            )
+        else:
+            self.active_view = ft.Container(
+                visible=False,
+                padding=ft.Padding.symmetric(horizontal=10, vertical=6),
+                border=ft.Border.all(1, ft.Colors.with_opacity(0.1, ft.Colors.WHITE)),
+                border_radius=10,
+                bgcolor=ft.Colors.with_opacity(0.02, ft.Colors.WHITE),
+                content=ft.Column([
+                    ft.Row([
+                        self.play_btn,
+                        ft.Container(content=self.track_title, expand=True, padding=ft.Padding.only(left=5)),
+                        ft.IconButton(
+                            icon=ft.Icons.MORE_HORIZ,
+                            icon_color=ft.Colors.BLUE_400,
+                            icon_size=20,
+                            tooltip="Выбрать другой файл",
+                            on_click=self.open_file
+                        )
+                    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+
+                    ft.Column([
+                        self.waveform_stack,
+                        ft.Container(
+                            content=self.trim_slider,
+                            margin=ft.Margin.symmetric(vertical=-4),
+                            padding=ft.Padding.symmetric(horizontal=0),
+                        ),
+                    ], spacing=0),
+
+                    ft.Row([
+                        self.start_time_text,
+                        self.trim_info,
+                        self.end_time_text
+                    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+
+                    ft.Divider(height=1, thickness=1, color=ft.Colors.with_opacity(0.03, ft.Colors.BLACK)),
+
+                    ft.Row([
+                        ft.Row([
+                            ft.Text("Скорость:", size=11, color=ft.Colors.GREY_700),
+                            self.speed_slider,
+                            self.speed_label
+                        ], spacing=10),
+                        ft.Row([
+                            ft.Text("Громкость:", size=11, color=ft.Colors.GREY_700),
+                            self.volume_slider,
+                            self.volume_label
+                        ], spacing=10),
+                    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
+                ], spacing=6)
+            )
 
         self.content = ft.Column([
             self.title_text,
             self.init_view,
             self.active_view
-        ], spacing=8)
+        ], spacing=6)
+
+        # Restore UI if file was passed in
+        if self.new_file_path and os.path.exists(self.new_file_path):
+            self._restore_file_state()
+
+    def _restore_file_state(self):
+        """Restore the UI state from a previously selected file (no dialog)."""
+        self.track_title.value = os.path.basename(self.new_file_path)
+        self.track_duration = get_audio_duration(self.new_file_path)
+
+        self.trim_slider.max = self.track_duration if self.track_duration > 0 else 1.0
+        self.trim_slider.start_value = self._saved_trim_start
+        self.trim_slider.end_value = self._saved_trim_end if self._saved_trim_end > 0 else self.track_duration
+
+        self.start_time_text.value = self.format_time(self.trim_slider.start_value)
+        self.end_time_text.value = self.format_time(self.trim_slider.end_value)
+        duration = self.trim_slider.end_value - self.trim_slider.start_value
+        self.trim_info.value = (
+            f"Обрезка: {self.format_time(self.trim_slider.start_value)} - "
+            f"{self.format_time(self.trim_slider.end_value)} ({self.format_time(duration)})"
+        )
+
+        self.waveform_image.src = generate_waveform_image(
+            self.new_file_path,
+            width=self.waveform_width,
+            height=self.waveform_height
+        )
+
+        # Apply overlays from saved trim values
+        if self.track_duration > 0:
+            start_px = int((self.trim_slider.start_value / self.track_duration) * self.waveform_width)
+            end_px = int((self.trim_slider.end_value / self.track_duration) * self.waveform_width)
+            self.waveform_overlay_left.width = start_px
+            self.waveform_line_start.left = start_px
+            self.waveform_overlay_right.left = end_px
+            self.waveform_overlay_right.width = self.waveform_width - end_px
+            self.waveform_line_end.left = end_px
+
+        self.speed_slider.value = self.current_speed
+        self.speed_label.value = f"{self.current_speed:.2f}x"
+
+        vol_percent = int(self.current_volume * 100)
+        self.volume_slider.value = vol_percent
+        self.volume_label.value = f"{vol_percent}%"
+
+        self.init_view.visible = False
+        self.active_view.visible = True
 
     def format_time(self, seconds: float) -> str:
         minutes = int(seconds // 60)
@@ -370,7 +490,7 @@ class ReplaceAudioZone(ft.Container):
             self.track_title.value = os.path.basename(selected_file_path)
 
             self.track_duration = get_audio_duration(selected_file_path)
-            self.samplerate = 44100  
+            self.samplerate = 44100
 
             self.trim_slider.max = self.track_duration if self.track_duration > 0 else 1.0
             self.trim_slider.start_value = 0.0

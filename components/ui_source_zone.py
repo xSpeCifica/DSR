@@ -6,27 +6,41 @@ from utils.audio_engine import AudioPlayerEngine
 from utils.ffmpeg_core import get_audio_duration
 from utils.i18n import t
 
-class SourceAudioZone(ft.Container):
-    def __init__(self):
-        super().__init__(width=650)
 
-        self.selected_path = None
-        self.audio_files: list[Path] = []
-        self.current_index = 0
+class SourceAudioZone(ft.Container):
+    def __init__(
+        self,
+        portrait_mode: bool = False,
+        selected_path: Path | None = None,
+        audio_files: list[Path] | None = None,
+        current_index: int = 0,
+    ):
+        self._portrait = portrait_mode
+
+        # ── Dimensions ──
+        zone_width = 520 if portrait_mode else 650
+        options_height = 160 if portrait_mode else 250
+        search_width = 280 if portrait_mode else 300
+
+        super().__init__(width=zone_width)
+
+        self.selected_path = selected_path
+        self.audio_files: list[Path] = list(audio_files) if audio_files else []
+        self.current_index = current_index
 
         self.player = None
         self.is_playing = False
 
         self.title_text = ft.Text(
-            t("source_zone.title"), 
-            size=14, 
-            weight=ft.FontWeight.W_600, 
+            t("source_zone.title"),
+            size=14,
+            weight=ft.FontWeight.W_600,
             color=ft.Colors.PINK_400
         )
 
         self.search_input = ft.TextField(
             hint_text=t("source_zone.search_hint"),
-            height=40,
+            height=38,
             text_size=14,
             border_radius=8,
             border_color=ft.Colors.PINK_700,
@@ -36,11 +50,15 @@ class SourceAudioZone(ft.Container):
 
         self.options_column = ft.Column(
             scroll=ft.ScrollMode.ADAPTIVE,
-            height=250,
-            spacing=4
+            height=options_height,
+            spacing=3
         )
 
-        self.dropdown_label = ft.Text(t("source_zone.dropdown_hint"), size=13, overflow=ft.TextOverflow.ELLIPSIS)
+        self.dropdown_label = ft.Text(
+            t("source_zone.dropdown_hint"),
+            size=13,
+            overflow=ft.TextOverflow.ELLIPSIS
+        )
 
         self.file_picker_menu = ft.PopupMenuButton(
             content=ft.Container(
@@ -62,27 +80,27 @@ class SourceAudioZone(ft.Container):
                         ft.Container(
                             content=self.search_input,
                             padding=ft.Padding.only(top=6, left=6, right=6, bottom=2),
-                            width=300
+                            width=search_width
                         ),
                         ft.Divider(height=1, thickness=1, color=ft.Colors.with_opacity(0.1, ft.Colors.PINK_100)),
                         ft.Container(
                             content=self.options_column,
                             padding=ft.Padding.only(left=6, right=6, bottom=6)
                         )
-                    ], spacing=4)
+                    ], spacing=3)
                 )
             ]
         )
 
         self.duration_text = ft.Text(
-            "00:00.000", 
-            size=12, 
-            weight=ft.FontWeight.W_600, 
-            color=ft.Colors.PINK_700, 
+            "00:00.000",
+            size=12,
+            weight=ft.FontWeight.W_600,
+            color=ft.Colors.PINK_700,
         )
 
         self.play_btn = ft.IconButton(
-            icon=ft.Icons.PLAY_ARROW_ROUNDED, 
+            icon=ft.Icons.PLAY_ARROW_ROUNDED,
             icon_color=ft.Colors.PINK_400,
             icon_size=24,
             width=36,
@@ -92,10 +110,10 @@ class SourceAudioZone(ft.Container):
         )
 
         self.counter_text = ft.Text(
-            "0 / 0", 
-            size=12, 
+            "0 / 0",
+            size=12,
             weight=ft.FontWeight.W_600,
-            color=ft.Colors.PINK_700, 
+            color=ft.Colors.PINK_700,
         )
 
         self.nav_row = ft.Row([
@@ -120,22 +138,23 @@ class SourceAudioZone(ft.Container):
             ),
         ], spacing=2, alignment=ft.MainAxisAlignment.CENTER)
 
+        # ── Init view ──
         self.init_view = ft.Container(
-            height=50, 
-            border=ft.Border.all(1, ft.Colors.with_opacity(0.3, ft.Colors.PINK_500)), 
+            height=46,
+            border=ft.Border.all(1, ft.Colors.with_opacity(0.3, ft.Colors.PINK_500)),
             border_radius=10,
             bgcolor=ft.Colors.with_opacity(0.01, ft.Colors.WHITE),
-            padding=ft.Padding.symmetric(horizontal=15),
+            padding=ft.Padding.symmetric(horizontal=12),
             content=ft.Row([
                 ft.Text(t("source_zone.placeholder"), size=13, opacity=0.8),
                 ft.Row([
                     ft.TextButton(
-                        t("source_zone.steam_btn"), 
+                        t("source_zone.steam_btn"),
                         on_click=self.handle_steam,
                         style=ft.ButtonStyle(color=ft.Colors.PINK_200)
                     ),
                     ft.ElevatedButton(
-                        t("source_zone.pick_folder"), 
+                        t("source_zone.pick_folder"),
                         on_click=self.handle_picker,
                         bgcolor=ft.Colors.with_opacity(0.1, ft.Colors.PINK_600),
                         color=ft.Colors.PINK_100,
@@ -144,30 +163,57 @@ class SourceAudioZone(ft.Container):
                             elevation=0
                         )
                     )
-                ], spacing=8)
+                ], spacing=6)
             ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
         )
 
-        self.active_view = ft.Container(
-            visible=False,
-            bgcolor=ft.Colors.with_opacity(0.02, ft.Colors.WHITE),
-            padding=ft.Padding.symmetric(horizontal=8, vertical=6), 
-            border_radius=10,
-            border=ft.Border.all(1, ft.Colors.with_opacity(0.1, ft.Colors.WHITE)),
-            content=ft.Row([
-                self.play_btn,
-                self.file_picker_menu,
-                ft.Container(content=self.duration_text, padding=ft.Padding.symmetric(horizontal=10)),
-                ft.VerticalDivider(width=1, thickness=1, color=ft.Colors.with_opacity(0.15, ft.Colors.PINK_100)),
-                ft.Container(content=self.nav_row, padding=ft.Padding.only(left=5))
-            ], vertical_alignment=ft.CrossAxisAlignment.CENTER)
-        )
+        # ── Active view: portrait = compact column layout ──
+        if portrait_mode:
+            self.active_view = ft.Container(
+                visible=False,
+                bgcolor=ft.Colors.with_opacity(0.02, ft.Colors.WHITE),
+                padding=ft.Padding.symmetric(horizontal=6, vertical=5),
+                border_radius=10,
+                border=ft.Border.all(1, ft.Colors.with_opacity(0.1, ft.Colors.WHITE)),
+                content=ft.Column([
+                    ft.Row([
+                        self.play_btn,
+                        ft.Container(content=self.file_picker_menu, expand=True),
+                    ], vertical_alignment=ft.CrossAxisAlignment.CENTER, spacing=4),
+                    ft.Row([
+                        ft.Container(
+                            content=self.duration_text,
+                            padding=ft.Padding.symmetric(horizontal=4)
+                        ),
+                        ft.Container(content=self.nav_row, padding=ft.Padding.only(left=4))
+                    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
+                ], spacing=3)
+            )
+        else:
+            self.active_view = ft.Container(
+                visible=False,
+                bgcolor=ft.Colors.with_opacity(0.02, ft.Colors.WHITE),
+                padding=ft.Padding.symmetric(horizontal=8, vertical=6),
+                border_radius=10,
+                border=ft.Border.all(1, ft.Colors.with_opacity(0.1, ft.Colors.WHITE)),
+                content=ft.Row([
+                    self.play_btn,
+                    self.file_picker_menu,
+                    ft.Container(content=self.duration_text, padding=ft.Padding.symmetric(horizontal=10)),
+                    ft.VerticalDivider(width=1, thickness=1, color=ft.Colors.with_opacity(0.15, ft.Colors.PINK_100)),
+                    ft.Container(content=self.nav_row, padding=ft.Padding.only(left=5))
+                ], vertical_alignment=ft.CrossAxisAlignment.CENTER)
+            )
 
         self.content = ft.Column([
             self.title_text,
             self.init_view,
             self.active_view
-        ], spacing=8)
+        ], spacing=6)
+
+        # Restore UI state if data was passed in
+        if self.audio_files:
+            self._update_ui_state()
 
     def format_time(self, seconds: float) -> str:
         minutes = int(seconds // 60)
@@ -188,13 +234,13 @@ class SourceAudioZone(ft.Container):
             items.append(
                 ft.Container(
                     content=ft.Text(
-                        file.name, 
-                        size=13, 
+                        file.name,
+                        size=13,
                         color=ft.Colors.WHITE if is_selected else ft.Colors.GREY_900,
                         weight=ft.FontWeight.W_600 if is_selected else ft.FontWeight.NORMAL,
                         overflow=ft.TextOverflow.ELLIPSIS
                     ),
-                    padding=ft.Padding.symmetric(horizontal=10, vertical=8),
+                    padding=ft.Padding.symmetric(horizontal=10, vertical=7),
                     border_radius=6,
                     bgcolor=ft.Colors.PINK_600 if is_selected else ft.Colors.TRANSPARENT,
                     alignment=ft.Alignment.CENTER_LEFT,
